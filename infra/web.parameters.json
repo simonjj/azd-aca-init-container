@@ -1,0 +1,24 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "environmentName": {
+      "value": "${AZURE_ENV_NAME}"
+    },
+    "registryEndpoint": {
+      "value": "${AZURE_CONTAINER_REGISTRY_ENDPOINT}"
+    },
+    "environmentId": {
+      "value": "${AZURE_CONTAINER_ENVIRONMENT_ID}"
+    },
+    "identityId": {
+      "value": "${IDENTITY_ID}"
+    },
+    "imageName": {
+      "value": "${SERVICE_WEB_IMAGE_NAME}"
+    },
+    "initImageName": {
+      "value": "${INIT_CONTAINER_IMAGE_NAME}"
+    }
+  }
+}

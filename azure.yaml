@@ -8,18 +8,12 @@ metadata:
 # This is the services section. We define one logical service called 'web'.
 services:
   web:
-    # The project directory for the service (relative to this file)
-    project: .
-    # The hosting platform for this service
+    project: ./src/my-app
     host: containerapp
     language: docker
-    # The build configuration
-    build:
-      # We define two build steps, one for each container image.
-      # 'azd' will build both and push them to the provisioned ACR.
-      - path: ./src/init-app
-        # The name of the image that will be built and pushed.
-        # This name will be used as a parameter name in Bicep.
-        image: my-init-container-app-init-app
-      - path: ./src/my-app
-        image: my-init-container-app-my-app
+    hooks:
+      prepackage:
+        run: |
+          docker build ../init-app -t init-app:latest
+          azd publish --from-package init-app:latest
+          azd env set INIT_CONTAINER_IMAGE_NAME "${AZURE_CONTAINER_REGISTRY_ENDPOINT}/init-app:latest"
