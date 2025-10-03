@@ -1,18 +1,15 @@
 @description('The location for all resources.')
 param location string = resourceGroup().location
+param environmentName string
 
-// Parameters to receive the container images built by azd.
-// The names MUST match the 'image' properties from azure.yaml, with dots replaced by underscores.
-@description('The image for the main application container.')
-param my_init_container_app_my_app string
-
-@description('The image for the init container.')
-param my_init_container_app_init_app string
+var tags = { 'azd-env-name': environmentName }
+var resourceToken = toLower(uniqueString(subscription().id, environmentName, location))
 
 // A Log Analytics workspace is required for the Container App Environment.
 resource logAnalytics 'Microsoft.OperationalInsights/workspaces@2022-10-01' = {
-  name: 'log-${uniqueString(resourceGroup().id)}'
+  name: 'log-${resourceToken}'
   location: location
+  tags: tags
   properties: {
     sku: {
       name: 'PerGB2018'
@@ -22,8 +19,9 @@ resource logAnalytics 'Microsoft.OperationalInsights/workspaces@2022-10-01' = {
 
 // The Container App Environment where all apps will be deployed.
 resource containerAppEnvironment 'Microsoft.App/managedEnvironments@2023-05-01' = {
-  name: 'cae-${uniqueString(resourceGroup().id)}'
+  name: 'cae-${resourceToken}'
   location: location
+  tags: tags
   properties: {
     appLogsConfiguration: {
       destination: 'log-analytics'
@@ -35,72 +33,43 @@ resource containerAppEnvironment 'Microsoft.App/managedEnvironments@2023-05-01' 
   }
 }
 
-// The main Container App resource
-resource containerApp 'Microsoft.App/containerApps@2023-05-01' = {
-  name: 'ca-${uniqueString(resourceGroup().id)}'
-  tags: {'azd-service-name': 'web'}
+// 2023-01-01-preview needed for anonymousPullEnabled
+resource containerRegistry 'Microsoft.ContainerRegistry/registries@2023-01-01-preview' = {
+  name: 'cr${resourceToken}'
   location: location
-  identity: {
-    type: 'SystemAssigned'
+  tags: tags
+  sku: {
+    name: 'Basic'
   }
   properties: {
-    managedEnvironmentId: containerAppEnvironment.id
-    configuration: {
-      // Ingress is required to access the app via HTTP
-      ingress: {
-        external: true
-        targetPort: 8080
-        transport: 'http'
-      }
+    adminUserEnabled: false
+    anonymousPullEnabled: false
+    dataEndpointEnabled: false
+    encryption: {
+      status: 'disabled'
     }
-    template: {
-      // Define a shared volume for the init and main container
-      volumes: [
-        {
-          name: 'shared-data'
-          storageType: 'EmptyDir'
-        }
-      ]
-      // Define the init containers
-      initContainers: [
-        {
-          name: 'my-init-container'
-          image: my_init_container_app_init_app
-          resources: {
-            cpu: json('0.25')
-            memory: '0.5Gi'
-          }
-          // Mount the shared volume
-          volumeMounts: [
-            {
-              volumeName: 'shared-data'
-              mountPath: '/shared'
-            }
-          ]
-        }
-      ]
-      // Define the main application containers
-      containers: [
-        {
-          name: 'my-main-app'
-          image: my_init_container_app_my_app
-          resources: {
-            cpu: json('0.5')
-            memory: '1.0Gi'
-          }
-          // Mount the same shared volume
-          volumeMounts: [
-            {
-              volumeName: 'shared-data'
-              mountPath: '/shared'
-            }
-          ]
-        }
-      ]
-    }
+    networkRuleBypassOptions: 'AzureServices'
+    publicNetworkAccess: 'Enabled'
+    zoneRedundancy: 'Disabled'
   }
 }
 
-// Output the URL of the deployed application
-@description('The URL of the deployed application.')
-output appUrl string = 'https://${containerApp.properties.configuration.ingress.fqdn}'
+resource managedIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
+  name: 'mi-${resourceToken}'
+  location: location
+  tags: tags
+}
+
+resource caeMiRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(containerRegistry.id, managedIdentity.id, subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d'))
+  scope: containerRegistry
+  properties: {
+    principalId: managedIdentity.properties.principalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId:  subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d')
+  }
+}
+
+output AZURE_CONTAINER_ENVIRONMENT_ID string = containerAppEnvironment.id
+output AZURE_CONTAINER_REGISTRY_ENDPOINT string = containerRegistry.properties.loginServer
+output IDENTITY_ID string = managedIdentity.id
